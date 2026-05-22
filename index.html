@@ -38,7 +38,6 @@
             </div>
             <h1 id="total-balance" class="text-5xl sm:text-6xl font-normal tracking-tight text-white hover:text-emerald-400 cursor-pointer transition-all duration-200 select-none">$0.00</h1>
             
-            <!-- Contextual Macro Marker Ribbon -->
             <div id="macro-tape" class="text-[11px] font-mono text-neutral-600 tracking-wider transition-all duration-300">
                 Nasdaq Tech Index (QQQ): <span id="qqq-value" class="text-neutral-500">Loading Index...</span>
             </div>
@@ -106,17 +105,15 @@
         const privacyToggle = document.getElementById('privacy-toggle');
         const privacyStatusLabel = document.getElementById('privacy-status-label');
 
-        // Main Sync Pipeline
         onValue(portfolioRef, (snapshot) => {
             const data = snapshot.val();
             portfolio = data || {};
             renderPortfolio();
         });
 
-        // Initialize Background Systems
         fetchMacroIndex();
         setInterval(refreshPrices, 120000);
-        setInterval(fetchMacroIndex, 300000); // Fetch QQQ macro data every 5 minutes
+        setInterval(fetchMacroIndex, 300000);
 
         totalBalanceDisplay.addEventListener('click', () => {
             if (!isPrivateMode) { refreshPrices(); }
@@ -173,7 +170,6 @@
             return null;
         }
 
-        // Secondary Independent Async Pipeline for Macro tracking
         async function fetchMacroIndex() {
             try {
                 const url = "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=QQQ&apikey=" + ALPHA_VANTAGE_KEY;
@@ -182,7 +178,6 @@
                 if (data["Global Quote"] && data["Global Quote"]["05. price"]) {
                     const price = parseFloat(data["Global Quote"]["05. price"]).toFixed(2);
                     const changePercent = data["Global Quote"]["10. change percent"] || "0.00%";
-                    
                     const cleanPercent = changePercent.replace('%', '');
                     const isPositive = parseFloat(cleanPercent) >= 0;
                     
@@ -218,6 +213,24 @@
             remove(ref(db, 'portfolio/' + ticker));
         };
 
+        // Generates dynamic placeholder colors deterministically based on character codes
+        function getBrandColorClass(string) {
+            const colors = [
+                'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+                'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+                'bg-blue-500/10 text-blue-400 border-blue-500/20',
+                'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+                'bg-violet-500/10 text-violet-400 border-violet-500/20',
+                'bg-purple-500/10 text-purple-400 border-purple-500/20',
+                'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20'
+            ];
+            let hash = 0;
+            for (let i = 0; i < string.length; i++) {
+                hash = string.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            return colors[Math.abs(hash) % colors.length];
+        }
+
         function renderPortfolio() {
             portfolioList.innerHTML = '';
             let grandTotal = 0;
@@ -250,8 +263,17 @@
                 const row = document.createElement('div');
                 row.className = "flex items-center justify-between py-3.5 group transition-all duration-150";
                 
-                const leftContainer = document.createElement('div');
-                leftContainer.className = "flex flex-col space-y-0.5";
+                // Left Layout wrapper aligning icon and names horizontally
+                const identityContainer = document.createElement('div');
+                identityContainer.className = "flex items-center space-x-3.5";
+                
+                // Generated UI Icon Badge
+                const logoIcon = document.createElement('div');
+                logoIcon.className = `w-9 h-9 flex items-center justify-center rounded-xl border text-xs font-bold tracking-wide font-mono shadow-sm flex-shrink-0 ${getBrandColorClass(item.ticker)}`;
+                logoIcon.textContent = item.ticker.charAt(0);
+                
+                const dataTextWrapper = document.createElement('div');
+                dataTextWrapper.className = "flex flex-col space-y-0.5";
                 
                 const badgeWrapper = document.createElement('div');
                 badgeWrapper.className = "flex items-center space-x-2";
@@ -260,11 +282,9 @@
                 symbolText.className = "text-sm font-medium tracking-wide text-neutral-200";
                 symbolText.textContent = item.ticker;
                 
-                // Risk exposure calculation engine
                 const allocationBadge = document.createElement('span');
                 const isOverConcentrated = parseFloat(allocationPercentage) > 50.0;
                 
-                // Color configuration turns amber if position constitutes > 50% of the entire tracking value
                 allocationBadge.className = isOverConcentrated 
                     ? "text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded-md font-mono font-bold shadow-sm shadow-amber-500/5 animate-pulse"
                     : "text-[10px] bg-neutral-900 border border-white/5 text-neutral-400 px-1.5 py-0.5 rounded-md font-mono font-medium";
@@ -278,8 +298,11 @@
                 sharesCountText.className = "text-xs text-neutral-500";
                 sharesCountText.textContent = item.shares.toLocaleString() + " shares";
                 
-                leftContainer.appendChild(badgeWrapper);
-                leftContainer.appendChild(sharesCountText);
+                dataTextWrapper.appendChild(badgeWrapper);
+                dataTextWrapper.appendChild(sharesCountText);
+                
+                identityContainer.appendChild(logoIcon);
+                identityContainer.appendChild(dataTextWrapper);
                 
                 const rightContainer = document.createElement('div');
                 rightContainer.className = "flex items-center space-x-4";
@@ -307,7 +330,7 @@
                 rightContainer.appendChild(quantitativeWrapper);
                 rightContainer.appendChild(deleteActionBtn);
                 
-                row.appendChild(leftContainer);
+                row.appendChild(identityContainer);
                 row.appendChild(rightContainer);
                 portfolioList.appendChild(row);
             });

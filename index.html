@@ -39,8 +39,15 @@
             <p id="error-msg" class="text-xs text-rose-400 mt-3 font-medium tracking-wide hidden"></p>
         </section>
 
-        <!-- Portfolio Dynamic Tracking View -->
-        <section class="bg-neutral-950/20 border border-white/5 rounded-2xl px-6 py-2 backdrop-blur-sm">
+        <!-- Portfolio Tracking View Container -->
+        <section class="bg-neutral-950/20 border border-white/5 rounded-2xl px-6 py-4 backdrop-blur-sm">
+            <!-- Table Header Component providing direct context for Asset Allocation -->
+            <div class="flex justify-between items-center pb-2 border-b border-white/5 text-[10px] uppercase tracking-wider font-semibold text-neutral-500 font-mono">
+                <span>Asset & Allocation</span>
+                <span>Total Value</span>
+            </div>
+            
+            <!-- Dynamic list container -->
             <div id="portfolio-list" class="divide-y divide-white/5"></div>
         </section>
         
@@ -194,7 +201,7 @@
                 const allocationPercentage = grandTotal > 0 ? ((item.totalValue / grandTotal) * 100).toFixed(1) : "0.0";
                 
                 const row = document.createElement('div');
-                row.className = "flex items-center justify-between py-4 group transition-all duration-150";
+                row.className = "flex items-center justify-between py-3.5 group transition-all duration-150";
                 
                 const leftContainer = document.createElement('div');
                 leftContainer.className = "flex flex-col space-y-0.5";
@@ -207,7 +214,7 @@
                 symbolText.textContent = item.ticker;
                 
                 const allocationBadge = document.createElement('span');
-                allocationBadge.className = "text-[10px] bg-neutral-900 border border-white/5 text-neutral-400 px-1.5 py-0.5 rounded-md font-mono";
+                allocationBadge.className = "text-[10px] bg-neutral-900 border border-white/5 text-neutral-400 px-1.5 py-0.5 rounded-md font-mono font-medium";
                 allocationBadge.textContent = allocationPercentage + "%";
                 
                 badgeWrapper.appendChild(symbolText);

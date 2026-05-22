@@ -23,10 +23,10 @@
 
     <main class="max-w-xl w-full mx-auto my-auto space-y-10">
         
-        <!-- Header & Balance Display -->
+        <!-- Header & Balance Display (Click Balance to Instantly Refresh Quotes) -->
         <header class="text-center space-y-1.5">
             <p class="text-[11px] uppercase tracking-[0.2em] text-neutral-500 font-semibold">Total Net Balance</p>
-            <h1 id="total-balance" class="text-5xl sm:text-6xl font-normal tracking-tight text-white">$0.00</h1>
+            <h1 id="total-balance" class="text-5xl sm:text-6xl font-normal tracking-tight text-white hover:text-emerald-400 cursor-pointer transition-colors duration-200 select-none">$0.00</h1>
         </header>
 
         <!-- Input Section -->
@@ -34,7 +34,7 @@
             <form id="asset-form" class="flex flex-col sm:flex-row gap-3">
                 <input type="text" id="ticker" placeholder="Symbol (e.g., NVDA)" required class="flex-1 bg-neutral-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-white/20 uppercase tracking-wider placeholder-neutral-600 transition-all duration-200">
                 <input type="number" id="shares" placeholder="Shares" required min="1" step="1" class="w-full sm:w-28 bg-neutral-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-white/20 placeholder-neutral-600 transition-all duration-200">
-                <button type="submit" class="bg-emerald-500 text-neutral-950 font-semibold text-sm rounded-xl px-6 py-3 hover:bg-emerald-400 transition-all duration-200 shadow-lg shadow-emerald-500/10 active:scale-[0.98]">Add Asset</button>
+                <button type="submit" id="submit-btn" class="bg-emerald-500 text-neutral-950 font-semibold text-sm rounded-xl px-6 py-3 hover:bg-emerald-400 transition-all duration-200 shadow-lg shadow-emerald-500/10 active:scale-[0.98]">Add Asset</button>
             </form>
             <p id="error-msg" class="text-xs text-rose-400 mt-3 font-medium tracking-wide hidden"></p>
         </section>
@@ -82,14 +82,22 @@
         const totalBalanceDisplay = document.getElementById('total-balance');
         const asOfTimeDisplay = document.getElementById('as-of-time');
         const errorMsg = document.getElementById('error-msg');
+        const submitBtn = document.getElementById('submit-btn');
 
+        // Continuous Sync with Realtime Database
         onValue(portfolioRef, (snapshot) => {
             const data = snapshot.val();
             portfolio = data || {};
             renderPortfolio();
         });
 
-        setInterval(refreshPrices, 60000);
+        // Background update sequence interval
+        setInterval(refreshPrices, 120000);
+
+        // Bind interactive on-demand global refresh to the Net Balance heading
+        totalBalanceDisplay.addEventListener('click', () => {
+            refreshPrices();
+        });
 
         assetForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -98,6 +106,9 @@
             const ticker = tickerInput.value.trim().toUpperCase();
             const shares = parseInt(sharesInput.value, 10);
             if (!ticker || isNaN(shares)) return;
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = "Fetching...";
 
             const existingShares = portfolio[ticker] ? portfolio[ticker].shares : 0;
             const newSharesTotal = existingShares + shares;
@@ -111,15 +122,18 @@
                     });
                     assetForm.reset();
                 } else {
-                    showError(`Could not find valid price data for "${ticker}".`);
+                    showError("Could not verify symbol price data.");
                 }
             } catch (err) {
-                showError("API limit encountered. Please wait a moment.");
+                showError("API connectivity limit hit.");
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = "Add Asset";
             }
         });
 
         async function fetchStockPrice(ticker) {
-            const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_KEY}`;
+            const url = "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=" + ticker + "&apikey=" + ALPHA_VANTAGE_KEY;
             const response = await fetch(url);
             const data = await response.json();
             
@@ -131,18 +145,20 @@
         }
 
         async function refreshPrices() {
+            totalBalanceDisplay.classList.add('animate-pulse', 'text-emerald-500');
             const tickers = Object.keys(portfolio);
             for (let ticker of tickers) {
                 try {
                     const freshPrice = await fetchStockPrice(ticker);
                     if (freshPrice) {
-                        await set(ref(db, `portfolio/${ticker}/price`), freshPrice);
+                        await set(ref(db, "portfolio/" + ticker + "/price"), freshPrice);
                     }
                     await new Promise(res => setTimeout(res, 1000)); 
                 } catch (e) {
                     console.error(e);
                 }
             }
+            totalBalanceDisplay.classList.remove('animate-pulse', 'text-emerald-500');
         }
 
         window.removeItem = function(ticker) {
@@ -154,52 +170,93 @@
             let grandTotal = 0;
             
             const portfolioArray = Object.keys(portfolio).map(ticker => {
+                const totalVal = portfolio[ticker].shares * portfolio[ticker].price;
+                grandTotal += totalVal;
                 return {
                     ticker: ticker,
                     shares: portfolio[ticker].shares,
                     price: portfolio[ticker].price,
-                    totalValue: portfolio[ticker].shares * portfolio[ticker].price
+                    totalValue: totalVal
                 };
             });
 
             if (portfolioArray.length === 0) {
-                portfolioList.innerHTML = `<p class="text-center text-xs text-neutral-600 tracking-wide py-6">No assets tracked</p>`;
+                portfolioList.innerHTML = '<p class="text-center text-xs text-neutral-600 tracking-wide py-6">No assets tracked</p>';
                 totalBalanceDisplay.textContent = '$0.00';
                 return;
             }
 
+            // Descending order sorting optimization engine
             portfolioArray.sort((a, b) => b.totalValue - a.totalValue);
 
+            // Safer procedural layout assembler bypassing nested parser string literals
             portfolioArray.forEach(item => {
-                grandTotal += item.totalValue;
-
+                const allocationPercentage = grandTotal > 0 ? ((item.totalValue / grandTotal) * 100).toFixed(1) : "0.0";
+                
                 const row = document.createElement('div');
                 row.className = "flex items-center justify-between py-4 group transition-all duration-150";
-                row.innerHTML = `
-                    <div class="flex flex-col space-y-0.5">
-                        <span class="text-sm font-medium tracking-wide text-neutral-200">${item.ticker}</span>
-                        <span class="text-xs text-neutral-500">${item.shares.toLocaleString()} shares</span>
-                    </div>
-                    <div class="flex items-center space-x-4">
-                        <div class="text-right flex flex-col space-y-0.5">
-                            <!-- Display precise 2-decimal financial string formatting -->
-                            <span class="text-sm font-medium text-white">$${item.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            <span class="text-[11px] text-neutral-500 font-mono">$${item.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / share</span>
-                        </div>
-                        <button onclick="removeItem('${item.ticker}')" class="text-neutral-600 hover:text-rose-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-x-1 group-hover:translate-x-0">✕</button>
-                    </div>
-                `;
+                
+                const leftContainer = document.createElement('div');
+                leftContainer.className = "flex flex-col space-y-0.5";
+                
+                const badgeWrapper = document.createElement('div');
+                badgeWrapper.className = "flex items-center space-x-2";
+                
+                const symbolText = document.createElement('span');
+                symbolText.className = "text-sm font-medium tracking-wide text-neutral-200";
+                symbolText.textContent = item.ticker;
+                
+                const allocationBadge = document.createElement('span');
+                allocationBadge.className = "text-[10px] bg-neutral-900 border border-white/5 text-neutral-400 px-1.5 py-0.5 rounded-md font-mono";
+                allocationBadge.textContent = allocationPercentage + "%";
+                
+                badgeWrapper.appendChild(symbolText);
+                badgeWrapper.appendChild(allocationBadge);
+                
+                const sharesCountText = document.createElement('span');
+                sharesCountText.className = "text-xs text-neutral-500";
+                sharesCountText.textContent = item.shares.toLocaleString() + " shares";
+                
+                leftContainer.appendChild(badgeWrapper);
+                leftContainer.appendChild(sharesCountText);
+                
+                const rightContainer = document.createElement('div');
+                rightContainer.className = "flex items-center space-x-4";
+                
+                const quantitativeWrapper = document.createElement('div');
+                quantitativeWrapper.className = "text-right flex flex-col space-y-0.5";
+                
+                const totalAssetValText = document.createElement('span');
+                totalAssetValText.className = "text-sm font-medium text-white";
+                totalAssetValText.textContent = "$" + item.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                
+                const unitPriceLabel = document.createElement('span');
+                unitPriceLabel.className = "text-[11px] text-neutral-500 font-mono";
+                unitPriceLabel.textContent = "$" + item.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " / share";
+                
+                quantitativeWrapper.appendChild(totalAssetValText);
+                quantitativeWrapper.appendChild(unitPriceLabel);
+                
+                const deleteActionBtn = document.createElement('button');
+                deleteActionBtn.className = "text-neutral-600 hover:text-rose-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-x-1 group-hover:translate-x-0";
+                deleteActionBtn.textContent = "✕";
+                deleteActionBtn.onclick = function() { window.removeItem(item.ticker); };
+                
+                rightContainer.appendChild(quantitativeWrapper);
+                rightContainer.appendChild(deleteActionBtn);
+                
+                row.appendChild(leftContainer);
+                row.appendChild(rightContainer);
                 portfolioList.appendChild(row);
             });
 
-            // Set grand total to match down to the exact penny
-            totalBalanceDisplay.textContent = `$${grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            totalBalanceDisplay.textContent = "$" + grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
 
         function updateTimestamp() {
             const now = new Date();
             const options = { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
-            const timestampStr = `As of: ${now.toLocaleString('en-US', options)}`;
+            const timestampStr = "As of: " + now.toLocaleString('en-US', options);
             asOfTimeDisplay.textContent = timestampStr;
             set(ref(db, 'lastUpdated'), timestampStr);
         }

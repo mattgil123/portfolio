@@ -32,10 +32,11 @@
     <main class="max-w-xl w-full mx-auto my-auto space-y-10">
         
         <!-- Header & Balance Display (Click Label to Toggle Privacy | Click Balance Number to Refresh) -->
-        <header class="text-center space-y-1">
-            <div id="privacy-toggle" class="group/toggle inline-flex items-center space-x-1 cursor-pointer select-none py-1 px-3 bg-neutral-950/20 hover:bg-white/5 rounded-full transition-all duration-150 border border-transparent hover:border-white/5">
+        <header class="text-center space-y-2">
+            <div id="privacy-toggle" class="group/toggle inline-flex items-center space-x-2 cursor-pointer select-none py-1.5 px-4 bg-neutral-950/40 hover:bg-white/5 rounded-full transition-all duration-150 border border-white/5 hover:border-white/10 shadow-sm">
                 <p class="text-[11px] uppercase tracking-[0.2em] text-neutral-500 font-semibold group-hover/toggle:text-neutral-300 transition-colors duration-150">Total Net Balance</p>
-                <span id="privacy-status-label" class="text-[9px] uppercase tracking-wider font-mono text-neutral-600 group-hover/toggle:text-neutral-400 transition-colors duration-150">[Hide]</span>
+                <!-- Size shifted to text-xs with a crisp bold font tracking signature -->
+                <span id="privacy-status-label" class="text-xs font-bold tracking-wide font-mono text-neutral-400 group-hover/toggle:text-emerald-400 transition-colors duration-150">[Hide]</span>
             </div>
             <h1 id="total-balance" class="text-5xl sm:text-6xl font-normal tracking-tight text-white hover:text-emerald-400 cursor-pointer transition-all duration-200 select-none">$0.00</h1>
         </header>
@@ -91,8 +92,6 @@
         const portfolioRef = ref(db, 'portfolio');
 
         let portfolio = {};
-        
-        // Initialize State tracking local storage cache parameters
         let isPrivateMode = localStorage.getItem('privacy_shutter_enabled') === 'true';
 
         const assetForm = document.getElementById('asset-form');
@@ -116,14 +115,14 @@
         // Background update sequence interval
         setInterval(refreshPrices, 120000);
 
-        // Clicking the exact Numeric Value triggers the Emerald Refresh interaction
+        // Clicking Numeric Value triggers Emerald Refresh sequence
         totalBalanceDisplay.addEventListener('click', () => {
             if (!isPrivateMode) {
                 refreshPrices();
             }
         });
 
-        // Clicking the separate Capsule Label exclusively controls Privacy Shutter state
+        // Clicking upper Capsule Capsule Pill triggers Privacy toggle
         privacyToggle.addEventListener('click', () => {
             isPrivateMode = !isPrivateMode;
             localStorage.setItem('privacy_shutter_enabled', isPrivateMode);
@@ -201,7 +200,6 @@
             portfolioList.innerHTML = '';
             let grandTotal = 0;
             
-            // Sync status labels explicitly
             privacyStatusLabel.textContent = isPrivateMode ? "[Show]" : "[Hide]";
 
             const portfolioArray = Object.keys(portfolio).map(ticker => {
@@ -222,7 +220,6 @@
                 return;
             }
 
-            // Descending order sorting optimization engine
             portfolioArray.sort((a, b) => b.totalValue - a.totalValue);
 
             portfolioArray.forEach(item => {
@@ -260,8 +257,6 @@
                 
                 const quantitativeWrapper = document.createElement('div');
                 quantitativeWrapper.className = "text-right flex flex-col space-y-0.5";
-                
-                // If privacy mode is true, add the target blur class selector to individual metrics
                 if (isPrivateMode) quantitativeWrapper.classList.add('private-mask');
                 
                 const totalAssetValText = document.createElement('span');

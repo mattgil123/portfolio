@@ -31,11 +31,11 @@
 
     <main class="max-w-xl w-full mx-auto my-auto space-y-10">
         
-        <!-- Header & Balance Display (Click Balance to Refresh | Click Label to Toggle Privacy) -->
+        <!-- Header & Balance Display (Click Label to Toggle Privacy | Click Balance Number to Refresh) -->
         <header class="text-center space-y-1">
-            <div id="privacy-toggle" class="group/toggle inline-flex items-center space-x-1 cursor-pointer select-none">
+            <div id="privacy-toggle" class="group/toggle inline-flex items-center space-x-1 cursor-pointer select-none py-1 px-3 bg-neutral-950/20 hover:bg-white/5 rounded-full transition-all duration-150 border border-transparent hover:border-white/5">
                 <p class="text-[11px] uppercase tracking-[0.2em] text-neutral-500 font-semibold group-hover/toggle:text-neutral-300 transition-colors duration-150">Total Net Balance</p>
-                <span id="privacy-status-label" class="text-[9px] uppercase tracking-wider font-mono text-neutral-700 opacity-0 group-hover/toggle:opacity-100 transition-opacity duration-150">[Hide]</span>
+                <span id="privacy-status-label" class="text-[9px] uppercase tracking-wider font-mono text-neutral-600 group-hover/toggle:text-neutral-400 transition-colors duration-150">[Hide]</span>
             </div>
             <h1 id="total-balance" class="text-5xl sm:text-6xl font-normal tracking-tight text-white hover:text-emerald-400 cursor-pointer transition-all duration-200 select-none">$0.00</h1>
         </header>
@@ -116,15 +116,14 @@
         // Background update sequence interval
         setInterval(refreshPrices, 120000);
 
-        // Bind interactive on-demand global refresh to the Net Balance heading
+        // Clicking the exact Numeric Value triggers the Emerald Refresh interaction
         totalBalanceDisplay.addEventListener('click', () => {
-            // Only trigger refresh if not hidden to protect interactions
             if (!isPrivateMode) {
                 refreshPrices();
             }
         });
 
-        // Handle Privacy Mode Click Interaction Sequence
+        // Clicking the separate Capsule Label exclusively controls Privacy Shutter state
         privacyToggle.addEventListener('click', () => {
             isPrivateMode = !isPrivateMode;
             localStorage.setItem('privacy_shutter_enabled', isPrivateMode);
@@ -202,7 +201,7 @@
             portfolioList.innerHTML = '';
             let grandTotal = 0;
             
-            // Sync current dynamic contextual status label parameters
+            // Sync status labels explicitly
             privacyStatusLabel.textContent = isPrivateMode ? "[Show]" : "[Hide]";
 
             const portfolioArray = Object.keys(portfolio).map(ticker => {
@@ -226,7 +225,6 @@
             // Descending order sorting optimization engine
             portfolioArray.sort((a, b) => b.totalValue - a.totalValue);
 
-            // Safer procedural layout assembler bypassing nested parser string literals
             portfolioArray.forEach(item => {
                 const allocationPercentage = grandTotal > 0 ? ((item.totalValue / grandTotal) * 100).toFixed(1) : "0.0";
                 
@@ -262,7 +260,9 @@
                 
                 const quantitativeWrapper = document.createElement('div');
                 quantitativeWrapper.className = "text-right flex flex-col space-y-0.5";
-                if (isPrivateMode) quantitativeWrapper.className += " private-mask";
+                
+                // If privacy mode is true, add the target blur class selector to individual metrics
+                if (isPrivateMode) quantitativeWrapper.classList.add('private-mask');
                 
                 const totalAssetValText = document.createElement('span');
                 totalAssetValText.className = "text-sm font-medium text-white";

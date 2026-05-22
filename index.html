@@ -17,16 +17,27 @@
             margin: 0;
         }
         input[type=number] { -moz-appearance: textfield; }
+        
+        /* Privacy Obfuscation Blurring Styles */
+        .private-mask {
+            filter: blur(8px);
+            opacity: 0.25;
+            pointer-events: none;
+            user-select: none;
+        }
     </style>
 </head>
 <body class="min-h-screen flex flex-col justify-between p-6 sm:p-12 selection:bg-emerald-500/30 selection:text-emerald-300">
 
     <main class="max-w-xl w-full mx-auto my-auto space-y-10">
         
-        <!-- Header & Balance Display (Click Balance to Instantly Refresh Quotes) -->
-        <header class="text-center space-y-1.5">
-            <p class="text-[11px] uppercase tracking-[0.2em] text-neutral-500 font-semibold">Total Net Balance</p>
-            <h1 id="total-balance" class="text-5xl sm:text-6xl font-normal tracking-tight text-white hover:text-emerald-400 cursor-pointer transition-colors duration-200 select-none">$0.00</h1>
+        <!-- Header & Balance Display (Click Balance to Refresh | Click Label to Toggle Privacy) -->
+        <header class="text-center space-y-1">
+            <div id="privacy-toggle" class="group/toggle inline-flex items-center space-x-1 cursor-pointer select-none">
+                <p class="text-[11px] uppercase tracking-[0.2em] text-neutral-500 font-semibold group-hover/toggle:text-neutral-300 transition-colors duration-150">Total Net Balance</p>
+                <span id="privacy-status-label" class="text-[9px] uppercase tracking-wider font-mono text-neutral-700 opacity-0 group-hover/toggle:opacity-100 transition-opacity duration-150">[Hide]</span>
+            </div>
+            <h1 id="total-balance" class="text-5xl sm:text-6xl font-normal tracking-tight text-white hover:text-emerald-400 cursor-pointer transition-all duration-200 select-none">$0.00</h1>
         </header>
 
         <!-- Input Section -->
@@ -41,7 +52,6 @@
 
         <!-- Portfolio Tracking View Container -->
         <section class="bg-neutral-950/20 border border-white/5 rounded-2xl px-6 py-4 backdrop-blur-sm">
-            <!-- Table Header Component providing direct context for Asset Allocation -->
             <div class="flex justify-between items-center pb-2 border-b border-white/5 text-[10px] uppercase tracking-wider font-semibold text-neutral-500 font-mono">
                 <span>Asset & Allocation</span>
                 <span>Total Value</span>
@@ -81,6 +91,9 @@
         const portfolioRef = ref(db, 'portfolio');
 
         let portfolio = {};
+        
+        // Initialize State tracking local storage cache parameters
+        let isPrivateMode = localStorage.getItem('privacy_shutter_enabled') === 'true';
 
         const assetForm = document.getElementById('asset-form');
         const tickerInput = document.getElementById('ticker');
@@ -90,6 +103,8 @@
         const asOfTimeDisplay = document.getElementById('as-of-time');
         const errorMsg = document.getElementById('error-msg');
         const submitBtn = document.getElementById('submit-btn');
+        const privacyToggle = document.getElementById('privacy-toggle');
+        const privacyStatusLabel = document.getElementById('privacy-status-label');
 
         // Continuous Sync with Realtime Database
         onValue(portfolioRef, (snapshot) => {
@@ -103,7 +118,17 @@
 
         // Bind interactive on-demand global refresh to the Net Balance heading
         totalBalanceDisplay.addEventListener('click', () => {
-            refreshPrices();
+            // Only trigger refresh if not hidden to protect interactions
+            if (!isPrivateMode) {
+                refreshPrices();
+            }
+        });
+
+        // Handle Privacy Mode Click Interaction Sequence
+        privacyToggle.addEventListener('click', () => {
+            isPrivateMode = !isPrivateMode;
+            localStorage.setItem('privacy_shutter_enabled', isPrivateMode);
+            renderPortfolio();
         });
 
         assetForm.addEventListener('submit', async (e) => {
@@ -152,6 +177,7 @@
         }
 
         async function refreshPrices() {
+            if (isPrivateMode) return;
             totalBalanceDisplay.classList.add('animate-pulse', 'text-emerald-500');
             const tickers = Object.keys(portfolio);
             for (let ticker of tickers) {
@@ -176,6 +202,9 @@
             portfolioList.innerHTML = '';
             let grandTotal = 0;
             
+            // Sync current dynamic contextual status label parameters
+            privacyStatusLabel.textContent = isPrivateMode ? "[Show]" : "[Hide]";
+
             const portfolioArray = Object.keys(portfolio).map(ticker => {
                 const totalVal = portfolio[ticker].shares * portfolio[ticker].price;
                 grandTotal += totalVal;
@@ -190,6 +219,7 @@
             if (portfolioArray.length === 0) {
                 portfolioList.innerHTML = '<p class="text-center text-xs text-neutral-600 tracking-wide py-6">No assets tracked</p>';
                 totalBalanceDisplay.textContent = '$0.00';
+                totalBalanceDisplay.classList.remove('private-mask');
                 return;
             }
 
@@ -232,6 +262,7 @@
                 
                 const quantitativeWrapper = document.createElement('div');
                 quantitativeWrapper.className = "text-right flex flex-col space-y-0.5";
+                if (isPrivateMode) quantitativeWrapper.className += " private-mask";
                 
                 const totalAssetValText = document.createElement('span');
                 totalAssetValText.className = "text-sm font-medium text-white";
@@ -257,7 +288,13 @@
                 portfolioList.appendChild(row);
             });
 
-            totalBalanceDisplay.textContent = "$" + grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            if (isPrivateMode) {
+                totalBalanceDisplay.textContent = "$ ••••••";
+                totalBalanceDisplay.classList.add('private-mask');
+            } else {
+                totalBalanceDisplay.textContent = "$" + grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                totalBalanceDisplay.classList.remove('private-mask');
+            }
         }
 
         function updateTimestamp() {

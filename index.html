@@ -55,7 +55,7 @@
                 <input type="number" id="shares" placeholder="Shares" required min="1" step="1" class="w-full sm:w-28 bg-neutral-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-white/20 placeholder-neutral-600 transition-all duration-200">
                 <button type="submit" id="submit-btn" class="bg-emerald-500 text-neutral-950 font-semibold text-sm rounded-xl px-6 py-3 hover:bg-emerald-400 transition-all duration-200 shadow-lg shadow-emerald-500/10 active:scale-[0.98]">Add Asset</button>
             </form>
-            <p id="error-msg" class="text-xs text-rose-400 mt-3 font-medium tracking-wide hidden"></p>
+            <p id="error-msg" class="text-xs text-rose-400 mt-3 font-medium tracking-wide hidden bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-xl text-center animate-pulse"></p>
         </section>
 
         <section class="bg-neutral-950/20 border border-white/5 rounded-2xl px-6 py-4 backdrop-blur-sm">
@@ -110,14 +110,12 @@
         const privacyStatusLabel = document.getElementById('privacy-status-label');
         const manualRefreshBtn = document.getElementById('manual-refresh-btn');
 
-        // Continuous sync with internal user database cache pipeline
         onValue(portfolioRef, (snapshot) => {
             const data = snapshot.val();
             portfolio = data || {};
             renderPortfolio();
         });
 
-        // Event listener mapping manual action button explicitly to force updates
         manualRefreshBtn.addEventListener('click', () => {
             refreshPrices();
         });
@@ -150,28 +148,45 @@
                         price: price
                     });
                     assetForm.reset();
-                } else {
-                    showError("Could not verify symbol price data.");
                 }
             } catch (err) {
-                showError("API connectivity limit hit.");
+                // Caught inside fetch stock price logic wrapper
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.textContent = "Add Asset";
             }
         });
 
-        // Appends exact millisecond markers to bypass remote network server edge caches
+        // Strict API data parsing validation engine
         async function fetchStockPrice(ticker) {
-            const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_KEY}&_=${Date.now()}`;
-            const response = await fetch(url);
-            const data = await response.json();
-            
-            if (data["Global Quote"] && data["Global Quote"]["05. price"]) {
-                updateTimestamp();
-                return parseFloat(data["Global Quote"]["05. price"]);
+            try {
+                const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_KEY}&_=${Date.now()}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                // Intercepts explicit rate limit notes or missing backend payloads
+                if (data["Note"]) {
+                    showError("Sync Throttled: Alpha Vantage 5-call per minute API limit reached.");
+                    return null;
+                }
+                
+                if (data["Information"]) {
+                    showError("API Message: " + data["Information"]);
+                    return null;
+                }
+
+                if (data["Global Quote"] && data["Global Quote"]["05. price"]) {
+                    errorMsg.classList.add('hidden'); // Clear errors if successful
+                    updateTimestamp();
+                    return parseFloat(data["Global Quote"]["05. price"]);
+                }
+                
+                showError(`Symbol "${ticker}" not found or data structural error.`);
+                return null;
+            } catch (err) {
+                showError("Network connection error. Failed to reach pricing server.");
+                return null;
             }
-            return null;
         }
 
         async function fetchMacroIndex() {
@@ -179,6 +194,12 @@
                 const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=QQQ&apikey=${ALPHA_VANTAGE_KEY}&_=${Date.now()}`;
                 const response = await fetch(url);
                 const data = await response.json();
+                
+                if (data["Note"]) {
+                    qqqValueDisplay.textContent = "Throttled (Wait 1m)";
+                    return;
+                }
+
                 if (data["Global Quote"] && data["Global Quote"]["05. price"]) {
                     const price = parseFloat(data["Global Quote"]["05. price"]).toFixed(2);
                     const changePercent = data["Global Quote"]["10. change percent"] || "0.00%";
@@ -194,21 +215,30 @@
             }
         }
 
-        // Forced clean update sequence loops through active portfolio entries
         async function refreshPrices() {
+            const tickers = Object.keys(portfolio);
+            if (tickers.length === 0) {
+                await fetchMacroIndex();
+                return;
+            }
+
             manualRefreshBtn.disabled = true;
             manualRefreshBtn.classList.add('text-emerald-400', 'bg-emerald-500/5');
             totalBalanceDisplay.classList.add('animate-pulse', 'text-emerald-500');
             
-            const tickers = Object.keys(portfolio);
+            errorMsg.classList.add('hidden');
+
             for (let ticker of tickers) {
                 try {
                     const freshPrice = await fetchStockPrice(ticker);
                     if (freshPrice) {
                         await set(ref(db, "portfolio/" + ticker + "/price"), freshPrice);
+                    } else {
+                        // Stop execution immediately if an update fails (e.g., due to rate limits)
+                        break; 
                     }
-                    // Introduces brief structural gaps to stay within api connection throttle limits
-                    await new Promise(res => setTimeout(res, 1000)); 
+                    // 1.5 second structural delay to safely pace API call frequency
+                    await new Promise(res => setTimeout(res, 1500)); 
                 } catch (e) {
                     console.error(e);
                 }

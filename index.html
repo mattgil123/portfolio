@@ -30,20 +30,25 @@
 
     <main class="max-w-xl w-full mx-auto my-auto space-y-10">
         
-        <!-- Header Container -->
         <header class="text-center space-y-2">
-            <div id="privacy-toggle" class="group/toggle inline-flex items-center space-x-2 cursor-pointer select-none py-1.5 px-4 bg-neutral-950/40 hover:bg-white/5 rounded-full transition-all duration-150 border border-white/5 hover:border-white/10 shadow-sm">
-                <p class="text-[11px] uppercase tracking-[0.2em] text-neutral-500 font-semibold group-hover/toggle:text-neutral-300 transition-colors duration-150">Total Net Balance</p>
-                <span id="privacy-status-label" class="text-xs font-bold tracking-wide font-mono text-neutral-400 group-hover/toggle:text-emerald-400 transition-colors duration-150">[Hide]</span>
+            <div class="flex items-center justify-center space-x-2">
+                <div id="privacy-toggle" class="group/toggle inline-flex items-center space-x-2 cursor-pointer select-none py-1.5 px-4 bg-neutral-950/40 hover:bg-white/5 rounded-l-full transition-all duration-150 border border-white/5 hover:border-white/10 shadow-sm">
+                    <p class="text-[11px] uppercase tracking-[0.2em] text-neutral-500 font-semibold group-hover/toggle:text-neutral-300 transition-colors duration-150">Total Net Balance</p>
+                    <span id="privacy-status-label" class="text-xs font-bold tracking-wide font-mono text-neutral-400 group-hover/toggle:text-emerald-400 transition-colors duration-150">[Hide]</span>
+                </div>
+                <button id="manual-refresh-btn" class="group/refresh inline-flex items-center space-x-1.5 cursor-pointer select-none py-1.5 px-4 bg-neutral-950/40 hover:bg-emerald-500/10 text-neutral-500 hover:text-emerald-400 font-mono text-xs font-bold rounded-r-full transition-all duration-150 border-y border-r border-white/5 hover:border-emerald-500/20 shadow-sm">
+                    <span class="inline-block group-hover/refresh:animate-spin">↻</span>
+                    <span>[Sync Data Now]</span>
+                </button>
             </div>
-            <h1 id="total-balance" class="text-5xl sm:text-6xl font-normal tracking-tight text-white hover:text-emerald-400 cursor-pointer transition-all duration-200 select-none">$0.00</h1>
+            
+            <h1 id="total-balance" class="text-5xl sm:text-6xl font-normal tracking-tight text-white transition-all duration-200 select-none">$0.00</h1>
             
             <div id="macro-tape" class="text-[11px] font-mono text-neutral-600 tracking-wider transition-all duration-300">
-                Nasdaq Tech Index (QQQ): <span id="qqq-value" class="text-neutral-500">Loading Index...</span>
+                Nasdaq Tech Index (QQQ): <span id="qqq-value" class="text-neutral-500">Awaiting Manual Sync...</span>
             </div>
         </header>
 
-        <!-- Input Form Section -->
         <section class="bg-neutral-950/40 border border-white/10 shadow-2xl shadow-black/80 rounded-2xl p-5 backdrop-blur-md">
             <form id="asset-form" class="flex flex-col sm:flex-row gap-3">
                 <input type="text" id="ticker" placeholder="Symbol (e.g., NVDA)" required class="flex-1 bg-neutral-900/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-white/20 uppercase tracking-wider placeholder-neutral-600 transition-all duration-200">
@@ -53,7 +58,6 @@
             <p id="error-msg" class="text-xs text-rose-400 mt-3 font-medium tracking-wide hidden"></p>
         </section>
 
-        <!-- Asset Overview List Window -->
         <section class="bg-neutral-950/20 border border-white/5 rounded-2xl px-6 py-4 backdrop-blur-sm">
             <div class="flex justify-between items-center pb-2 border-b border-white/5 text-[10px] uppercase tracking-wider font-semibold text-neutral-500 font-mono">
                 <span>Asset & Allocation</span>
@@ -104,19 +108,18 @@
         const submitBtn = document.getElementById('submit-btn');
         const privacyToggle = document.getElementById('privacy-toggle');
         const privacyStatusLabel = document.getElementById('privacy-status-label');
+        const manualRefreshBtn = document.getElementById('manual-refresh-btn');
 
+        // Continuous sync with internal user database cache pipeline
         onValue(portfolioRef, (snapshot) => {
             const data = snapshot.val();
             portfolio = data || {};
             renderPortfolio();
         });
 
-        fetchMacroIndex();
-        setInterval(refreshPrices, 120000);
-        setInterval(fetchMacroIndex, 300000);
-
-        totalBalanceDisplay.addEventListener('click', () => {
-            if (!isPrivateMode) { refreshPrices(); }
+        // Event listener mapping manual action button explicitly to force updates
+        manualRefreshBtn.addEventListener('click', () => {
+            refreshPrices();
         });
 
         privacyToggle.addEventListener('click', () => {
@@ -158,8 +161,9 @@
             }
         });
 
+        // Appends exact millisecond markers to bypass remote network server edge caches
         async function fetchStockPrice(ticker) {
-            const url = "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=" + ticker + "&apikey=" + ALPHA_VANTAGE_KEY;
+            const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_KEY}&_=${Date.now()}`;
             const response = await fetch(url);
             const data = await response.json();
             
@@ -172,7 +176,7 @@
 
         async function fetchMacroIndex() {
             try {
-                const url = "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=QQQ&apikey=" + ALPHA_VANTAGE_KEY;
+                const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=QQQ&apikey=${ALPHA_VANTAGE_KEY}&_=${Date.now()}`;
                 const response = await fetch(url);
                 const data = await response.json();
                 if (data["Global Quote"] && data["Global Quote"]["05. price"]) {
@@ -190,9 +194,12 @@
             }
         }
 
+        // Forced clean update sequence loops through active portfolio entries
         async function refreshPrices() {
-            if (isPrivateMode) return;
+            manualRefreshBtn.disabled = true;
+            manualRefreshBtn.classList.add('text-emerald-400', 'bg-emerald-500/5');
             totalBalanceDisplay.classList.add('animate-pulse', 'text-emerald-500');
+            
             const tickers = Object.keys(portfolio);
             for (let ticker of tickers) {
                 try {
@@ -200,20 +207,24 @@
                     if (freshPrice) {
                         await set(ref(db, "portfolio/" + ticker + "/price"), freshPrice);
                     }
+                    // Introduces brief structural gaps to stay within api connection throttle limits
                     await new Promise(res => setTimeout(res, 1000)); 
                 } catch (e) {
                     console.error(e);
                 }
             }
+            
+            await fetchMacroIndex();
+            
             totalBalanceDisplay.classList.remove('animate-pulse', 'text-emerald-500');
-            fetchMacroIndex();
+            manualRefreshBtn.disabled = false;
+            manualRefreshBtn.classList.remove('text-emerald-400', 'bg-emerald-500/5');
         }
 
         window.removeItem = function(ticker) {
             remove(ref(db, 'portfolio/' + ticker));
         };
 
-        // Generates dynamic placeholder colors deterministically based on character codes
         function getBrandColorClass(string) {
             const colors = [
                 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
@@ -263,11 +274,9 @@
                 const row = document.createElement('div');
                 row.className = "flex items-center justify-between py-3.5 group transition-all duration-150";
                 
-                // Left Layout wrapper aligning icon and names horizontally
                 const identityContainer = document.createElement('div');
                 identityContainer.className = "flex items-center space-x-3.5";
                 
-                // Generated UI Icon Badge
                 const logoIcon = document.createElement('div');
                 logoIcon.className = `w-9 h-9 flex items-center justify-center rounded-xl border text-xs font-bold tracking-wide font-mono shadow-sm flex-shrink-0 ${getBrandColorClass(item.ticker)}`;
                 logoIcon.textContent = item.ticker.charAt(0);
@@ -286,7 +295,7 @@
                 const isOverConcentrated = parseFloat(allocationPercentage) > 50.0;
                 
                 allocationBadge.className = isOverConcentrated 
-                    ? "text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded-md font-mono font-bold shadow-sm shadow-amber-500/5 animate-pulse"
+                    ? "text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded-md font-mono font-bold shadow-sm shadow-amber-500/5"
                     : "text-[10px] bg-neutral-900 border border-white/5 text-neutral-400 px-1.5 py-0.5 rounded-md font-mono font-medium";
                 
                 allocationBadge.textContent = allocationPercentage + "%" + (isOverConcentrated ? " ⚠" : "");

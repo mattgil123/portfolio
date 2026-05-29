@@ -51,8 +51,7 @@
 
         <section class="border-b border-white/5 pb-1">
             <div class="flex items-center justify-between">
-                <div id="tabs-container" class="flex items-center space-x-1 overflow-x-auto no-scrollbar scroll-smooth pr-4">
-                    </div>
+                <div id="tabs-container" class="flex items-center space-x-1 overflow-x-auto no-scrollbar scroll-smooth pr-4"></div>
                 <button id="add-tab-btn" class="text-xs font-mono font-bold bg-neutral-950/60 hover:bg-white/5 border border-white/5 hover:border-white/10 px-3 py-1.5 rounded-lg text-neutral-400 hover:text-emerald-400 transition-all active:scale-[0.95] flex-shrink-0">
                     + New Tab
                 </button>
@@ -85,7 +84,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-        import { getDatabase, ref, set, onValue, remove, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+        import { getDatabase, ref, set, onValue, remove, update, get } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAY9RtBtL5oSpJLJXoe8SMCEZfNB5HDND8",
@@ -103,7 +102,6 @@
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
 
-        // Core Tracking State Variables
         let activeTab = localStorage.getItem('active_portfolio_tab') || 'Main Portfolio';
         let customTabsList = JSON.parse(localStorage.getItem('portfolio_tabs_list')) || ['Main Portfolio', 'Tech Growth'];
         let portfolio = {};
@@ -124,24 +122,43 @@
         const syncIcon = document.getElementById('sync-icon');
         const syncText = document.getElementById('sync-text');
         const tabsContainer = document.getElementById('tabs-container');
-        const addTabBtn = document.getElementById('add-add-tab-btn');
 
-        // Dynamic Firebase Sync Listener Core Pipeline
+        // FIXED: Migration hook checks for older legacy structures and smoothly moves them
+        async function checkAndMigrateLegacyData() {
+            try {
+                const legacySnapshot = await get(ref(db, 'portfolio'));
+                if (legacySnapshot.exists() && legacySnapshot.val() !== null) {
+                    const legacyData = legacySnapshot.val();
+                    // Move legacy data into your "Main Portfolio" workspace tab automatically
+                    await set(ref(db, 'portfolios/Main Portfolio'), legacyData);
+                    // Clear out old folder location to avoid cluttering database tree
+                    await remove(ref(db, 'portfolio'));
+                }
+            } catch (e) {
+                console.error("Migration handling skip: ", e);
+            }
+        }
+
         let currentDataListener = null;
+        let currentTimestampListener = null;
+
         function attachDatabaseListener() {
-            if (currentDataListener) currentDataListener(); // Disconnect existing database branches
+            if (currentDataListener) currentDataListener();
+            if (currentTimestampListener) currentTimestampListener();
             
-            // Re-route database path pointers completely based on current tab value
-            const safeTabPath = encodeURIComponent(activeTab);
-            const relativeRef = ref(db, `portfolios/${safeTabPath}`);
-            
+            // FIXED: Removed encodeURIComponent to pass regular strings safely into Firebase
+            const relativeRef = ref(db, `portfolios/${activeTab}`);
             currentDataListener = onValue(relativeRef, (snapshot) => {
                 portfolio = snapshot.val() || {};
                 renderPortfolio();
             });
+
+            currentTimestampListener = onValue(ref(db, `lastUpdated_${activeTab}`), (snapshot) => {
+                if (snapshot.exists()) asOfTimeDisplay.textContent = snapshot.val();
+                else asOfTimeDisplay.textContent = "As of: Needs initial sync";
+            });
         }
 
-        // Tab Renderer Interface Engine
         function renderTabs() {
             tabsContainer.innerHTML = '';
             customTabsList.forEach(tabName => {
@@ -155,7 +172,6 @@
                 }`;
                 tab.textContent = tabName;
                 
-                // Clicking swaps the dynamic routing instantly
                 tab.addEventListener('click', () => {
                     activeTab = tabName;
                     localStorage.setItem('active_portfolio_tab', activeTab);
@@ -163,12 +179,12 @@
                     attachDatabaseListener();
                 });
                 
-                // Right-click options allow destroying empty/old tabs easily
                 tab.addEventListener('contextmenu', (e) => {
                     e.preventDefault();
-                    if (customTabsList.length <= 1) return; // Retain at least one default workspace
+                    if (customTabsList.length <= 1) return;
                     if (confirm(`Delete the tab group "${tabName}" entirely?`)) {
-                        remove(ref(db, `portfolios/${encodeURIComponent(tabName)}`));
+                        remove(ref(db, `portfolios/${tabName}`));
+                        remove(ref(db, `lastUpdated_${tabName}`));
                         customTabsList = customTabsList.filter(t => t !== tabName);
                         localStorage.setItem('portfolio_tabs_list', JSON.stringify(customTabsList));
                         if (activeTab === tabName) activeTab = customTabsList[0];
@@ -182,13 +198,12 @@
             });
         }
 
-        // Add Tab Interface Functionality
         document.getElementById('add-tab-btn').addEventListener('click', () => {
             const newName = prompt("Enter a unique name for your new asset tab:");
             if (!newName) return;
             const cleanName = newName.trim();
-            if (cleanName === '' || customTabsList.includes(cleanName)) {
-                alert("Invalid or duplicate portfolio tab name.");
+            if (cleanName === '' || customTabsList.includes(cleanName) || cleanName.includes('.') || cleanName.includes('#') || cleanName.includes('$') || cleanName.includes('[') || cleanName.includes(']')) {
+                alert("Invalid or duplicate portfolio tab name. Avoid special database characters.");
                 return;
             }
             customTabsList.push(cleanName);
@@ -199,7 +214,8 @@
             attachDatabaseListener();
         });
 
-        // Initialize App Tracking Hooks
+        // Safe Initialization sequence
+        await checkAndMigrateLegacyData();
         renderTabs();
         attachDatabaseListener();
 
@@ -230,58 +246,11 @@
             try {
                 const price = await fetchStockPrice(ticker);
                 if (price) {
-                    const safeTabPath = encodeURIComponent(activeTab);
-                    await set(ref(db, `portfolios/${safeTabPath}/${ticker}`), {
+                    await set(ref(db, `portfolios/${activeTab}/${ticker}`), {
                         shares: newSharesTotal,
                         price: price
                     });
                     assetForm.reset();
                 }
             } catch (err) {
-                console.error(err);
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.textContent = "Add Asset";
-            }
-        });
-
-        async function fetchStockPrice(ticker) {
-            try {
-                const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_KEY}&_=${Date.now()}`;
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                if (data["Note"]) {
-                    showError("Sync Throttled: Alpha Vantage API limit reached.");
-                    return null;
-                }
-
-                if (data["Global Quote"] && data["Global Quote"]["05. price"]) {
-                    return parseFloat(data["Global Quote"]["05. price"]);
-                }
-                
-                showError(`Symbol "${ticker}" not verified or out of bounds.`);
-                return null;
-            } catch (err) {
-                showError("Network connection error. Failed to reach pricing server.");
-                return null;
-            }
-        }
-
-        async function fetchMacroIndex() {
-            try {
-                const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=QQQ&apikey=${ALPHA_VANTAGE_KEY}&_=${Date.now()}`;
-                const response = await fetch(url);
-                const data = await response.json();
-                if (data["Global Quote"] && data["Global Quote"]["05. price"]) {
-                    const price = parseFloat(data["Global Quote"]["05. price"]).toFixed(2);
-                    const changePercent = data["Global Quote"]["10. change percent"] || "0.00%";
-                    const cleanPercent = changePercent.replace('%', '');
-                    const isPositive = parseFloat(cleanPercent) >= 0;
-                    
-                    qqqValueDisplay.className = isPositive ? "text-emerald-400 font-medium" : "text-rose-400 font-medium";
-                    qqqValueDisplay.textContent = "$" + price + " (" + (isPositive ? "+" : "") + cleanPercent + "%)";
-                }
-            } catch (e) {
-                qqqValueDisplay.textContent = "Unavailable";
-                qqqValueDisplay.className
+                console.error

@@ -123,15 +123,13 @@
         const syncText = document.getElementById('sync-text');
         const tabsContainer = document.getElementById('tabs-container');
 
-        // FIXED: Migration hook checks for older legacy structures and smoothly moves them
+        // FIXED: Run inside a safe, non-blocking bootstrap architecture
         async function checkAndMigrateLegacyData() {
             try {
                 const legacySnapshot = await get(ref(db, 'portfolio'));
                 if (legacySnapshot.exists() && legacySnapshot.val() !== null) {
                     const legacyData = legacySnapshot.val();
-                    // Move legacy data into your "Main Portfolio" workspace tab automatically
                     await set(ref(db, 'portfolios/Main Portfolio'), legacyData);
-                    // Clear out old folder location to avoid cluttering database tree
                     await remove(ref(db, 'portfolio'));
                 }
             } catch (e) {
@@ -146,7 +144,6 @@
             if (currentDataListener) currentDataListener();
             if (currentTimestampListener) currentTimestampListener();
             
-            // FIXED: Removed encodeURIComponent to pass regular strings safely into Firebase
             const relativeRef = ref(db, `portfolios/${activeTab}`);
             currentDataListener = onValue(relativeRef, (snapshot) => {
                 portfolio = snapshot.val() || {};
@@ -202,6 +199,7 @@
             const newName = prompt("Enter a unique name for your new asset tab:");
             if (!newName) return;
             const cleanName = newName.trim();
+            // Core database safety checks
             if (cleanName === '' || customTabsList.includes(cleanName) || cleanName.includes('.') || cleanName.includes('#') || cleanName.includes('$') || cleanName.includes('[') || cleanName.includes(']')) {
                 alert("Invalid or duplicate portfolio tab name. Avoid special database characters.");
                 return;
@@ -214,10 +212,16 @@
             attachDatabaseListener();
         });
 
-        // Safe Initialization sequence
-        await checkAndMigrateLegacyData();
-        renderTabs();
-        attachDatabaseListener();
+        // FIXED: Safe execution entry point completely eliminates top-level freezing risks
+        function bootstrapApp() {
+            renderTabs();
+            attachDatabaseListener();
+            
+            // Perform data lookups safely in the background
+            checkAndMigrateLegacyData();
+        }
+        
+        bootstrapApp();
 
         manualRefreshBtn.addEventListener('click', () => {
             refreshPrices();
@@ -253,4 +257,251 @@
                     assetForm.reset();
                 }
             } catch (err) {
-                console.error
+                console.error(err);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = "Add Asset";
+            }
+        });
+
+        async function fetchStockPrice(ticker) {
+            try {
+                const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_KEY}&_=${Date.now()}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data["Note"]) {
+                    showError("Sync Throttled: Alpha Vantage API limit reached.");
+                    return null;
+                }
+
+                if (data["Global Quote"] && data["Global Quote"]["05. price"]) {
+                    return parseFloat(data["Global Quote"]["05. price"]);
+                }
+                
+                showError(`Symbol "${ticker}" not verified or out of bounds.`);
+                return null;
+            } catch (err) {
+                showError("Network connection error. Failed to reach pricing server.");
+                return null;
+            }
+        }
+
+        async function fetchMacroIndex() {
+            try {
+                const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=QQQ&apikey=${ALPHA_VANTAGE_KEY}&_=${Date.now()}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data["Note"]) {
+                    qqqValueDisplay.textContent = "Throttled (Wait 1m)";
+                    return;
+                }
+                if (data["Global Quote"] && data["Global Quote"]["05. price"]) {
+                    const price = parseFloat(data["Global Quote"]["05. price"]).toFixed(2);
+                    const changePercent = data["Global Quote"]["10. change percent"] || "0.00%";
+                    const cleanPercent = changePercent.replace('%', '');
+                    const isPositive = parseFloat(cleanPercent) >= 0;
+                    
+                    qqqValueDisplay.className = isPositive ? "text-emerald-400 font-medium" : "text-rose-400 font-medium";
+                    qqqValueDisplay.textContent = "$" + price + " (" + (isPositive ? "+" : "") + cleanPercent + "%)";
+                }
+            } catch (e) {
+                qqqValueDisplay.textContent = "Unavailable";
+                qqqValueDisplay.className = "text-neutral-600";
+            }
+        }
+
+        async function refreshPrices() {
+            const tickers = Object.keys(portfolio);
+            if (tickers.length === 0) {
+                await fetchMacroIndex();
+                return;
+            }
+
+            manualRefreshBtn.disabled = true;
+            syncIcon.classList.add('animate-spin');
+            totalBalanceDisplay.classList.add('animate-pulse', 'text-emerald-500');
+            errorMsg.classList.add('hidden');
+
+            const updatesBatch = {};
+            let globalSyncSuccess = true;
+
+            for (let ticker of tickers) {
+                syncText.textContent = `[Syncing: ${ticker}...]`;
+                try {
+                    const freshPrice = await fetchStockPrice(ticker);
+                    if (freshPrice) {
+                        updatesBatch[`portfolios/${activeTab}/${ticker}/price`] = freshPrice;
+                    } else {
+                        globalSyncSuccess = false;
+                        break; 
+                    }
+                    await new Promise(res => setTimeout(res, 1800)); 
+                } catch (e) {
+                    globalSyncSuccess = false;
+                    break;
+                }
+            }
+            
+            if (globalSyncSuccess && Object.keys(updatesBatch).length > 0) {
+                syncText.textContent = `[Finishing...]`;
+                await update(ref(db), updatesBatch);
+                updateTimestamp();
+                await fetchMacroIndex();
+            }
+
+            totalBalanceDisplay.classList.remove('animate-pulse', 'text-emerald-500');
+            syncIcon.classList.remove('animate-spin');
+            syncText.textContent = "[Sync Group]";
+            manualRefreshBtn.disabled = false;
+        }
+
+        window.removeItem = function(ticker) {
+            remove(ref(db, `portfolios/${activeTab}/${ticker}`));
+        };
+
+        function getBrandColorClass(string) {
+            const colors = [
+                'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+                'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+                'bg-blue-500/10 text-blue-400 border-blue-500/20',
+                'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+                'bg-violet-500/10 text-violet-400 border-violet-500/20',
+                'bg-purple-500/10 text-purple-400 border-purple-500/20',
+                'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20'
+            ];
+            let hash = 0;
+            for (let i = 0; i < string.length; i++) {
+                hash = string.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            return colors[Math.abs(hash) % colors.length];
+        }
+
+        function renderPortfolio() {
+            portfolioList.innerHTML = '';
+            let grandTotal = 0;
+            
+            privacyStatusLabel.textContent = isPrivateMode ? "[Show]" : "[Hide]";
+            document.getElementById('allocation-header-title').textContent = `${activeTab} Assets`;
+
+            const portfolioArray = Object.keys(portfolio).map(ticker => {
+                const totalVal = portfolio[ticker].shares * portfolio[ticker].price;
+                grandTotal += totalVal;
+                return {
+                    ticker: ticker,
+                    shares: portfolio[ticker].shares,
+                    price: portfolio[ticker].price,
+                    totalValue: totalVal
+                };
+            });
+
+            if (portfolioArray.length === 0) {
+                portfolioList.innerHTML = `<p class="text-center text-xs text-neutral-600 tracking-wide py-6">No assets inside "${activeTab}" yet</p>`;
+                totalBalanceDisplay.textContent = '$0.00';
+                totalBalanceDisplay.classList.remove('private-mask');
+                return;
+            }
+
+            portfolioArray.sort((a, b) => b.totalValue - a.totalValue);
+
+            portfolioArray.forEach(item => {
+                const allocationPercentage = grandTotal > 0 ? ((item.totalValue / grandTotal) * 100).toFixed(1) : "0.0";
+                
+                const row = document.createElement('div');
+                row.className = "flex items-center justify-between py-3.5 group transition-all duration-150";
+                
+                const identityContainer = document.createElement('div');
+                identityContainer.className = "flex items-center space-x-3.5";
+                
+                const logoIcon = document.createElement('div');
+                logoIcon.className = `w-9 h-9 flex items-center justify-center rounded-xl border text-xs font-bold tracking-wide font-mono shadow-sm flex-shrink-0 ${getBrandColorClass(item.ticker)}`;
+                logoIcon.textContent = item.ticker.charAt(0);
+                
+                const dataTextWrapper = document.createElement('div');
+                dataTextWrapper.className = "flex flex-col space-y-0.5";
+                
+                const badgeWrapper = document.createElement('div');
+                badgeWrapper.className = "flex items-center space-x-2";
+                
+                const symbolText = document.createElement('span');
+                symbolText.className = "text-sm font-medium tracking-wide text-neutral-200";
+                symbolText.textContent = item.ticker;
+                
+                const allocationBadge = document.createElement('span');
+                const isOverConcentrated = parseFloat(allocationPercentage) > 50.0;
+                
+                allocationBadge.className = isOverConcentrated 
+                    ? "text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded-md font-mono font-bold shadow-sm shadow-amber-500/5"
+                    : "text-[10px] bg-neutral-900 border border-white/5 text-neutral-400 px-1.5 py-0.5 rounded-md font-mono font-medium";
+                
+                allocationBadge.textContent = allocationPercentage + "%" + (isOverConcentrated ? " ⚠" : "");
+                
+                badgeWrapper.appendChild(symbolText);
+                badgeWrapper.appendChild(allocationBadge);
+                
+                const sharesCountText = document.createElement('span');
+                sharesCountText.className = "text-xs text-neutral-500";
+                sharesCountText.textContent = item.shares.toLocaleString() + " shares";
+                
+                dataTextWrapper.appendChild(badgeWrapper);
+                dataTextWrapper.appendChild(sharesCountText);
+                
+                identityContainer.appendChild(logoIcon);
+                identityContainer.appendChild(dataTextWrapper);
+                
+                const rightContainer = document.createElement('div');
+                rightContainer.className = "flex items-center space-x-4";
+                
+                const quantitativeWrapper = document.createElement('div');
+                quantitativeWrapper.className = "text-right flex flex-col space-y-0.5";
+                if (isPrivateMode) quantitativeWrapper.classList.add('private-mask');
+                
+                const totalAssetValText = document.createElement('span');
+                totalAssetValText.className = "text-sm font-medium text-white";
+                totalAssetValText.textContent = "$" + item.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                
+                const unitPriceLabel = document.createElement('span');
+                unitPriceLabel.className = "text-[11px] text-neutral-500 font-mono";
+                unitPriceLabel.textContent = "$" + item.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " / share";
+                
+                quantitativeWrapper.appendChild(totalAssetValText);
+                quantitativeWrapper.appendChild(unitPriceLabel);
+                
+                const deleteActionBtn = document.createElement('button');
+                deleteActionBtn.className = "text-neutral-600 hover:text-rose-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-x-1 group-hover:translate-x-0";
+                deleteActionBtn.textContent = "✕";
+                deleteActionBtn.onclick = function() { window.removeItem(item.ticker); };
+                
+                rightContainer.appendChild(quantitativeWrapper);
+                rightContainer.appendChild(deleteActionBtn);
+                
+                row.appendChild(identityContainer);
+                row.appendChild(rightContainer);
+                portfolioList.appendChild(row);
+            });
+
+            if (isPrivateMode) {
+                totalBalanceDisplay.textContent = "$ ••••••";
+                totalBalanceDisplay.classList.add('private-mask');
+            } else {
+                totalBalanceDisplay.textContent = "$" + grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                totalBalanceDisplay.classList.remove('private-mask');
+            }
+        }
+
+        function updateTimestamp() {
+            const now = new Date();
+            const options = { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
+            const timestampStr = "As of: " + now.toLocaleString('en-US', options);
+            asOfTimeDisplay.textContent = timestampStr;
+            set(ref(db, `lastUpdated_${activeTab}`), timestampStr);
+        }
+
+        function showError(msg) {
+            errorMsg.textContent = msg;
+            errorMsg.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>

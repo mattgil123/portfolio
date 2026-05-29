@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cloud Portfolio</title>
+    <title>Cloud Portfolio Hub</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -28,7 +28,7 @@
 </head>
 <body class="min-h-screen flex flex-col justify-between p-6 sm:p-12 selection:bg-emerald-500/30 selection:text-emerald-300">
 
-    <main class="max-w-xl w-full mx-auto my-auto space-y-10">
+    <main class="max-w-xl w-full mx-auto my-auto space-y-8">
         
         <header class="text-center space-y-2">
             <div class="flex items-center justify-center space-x-2">
@@ -38,7 +38,7 @@
                 </div>
                 <button id="manual-refresh-btn" class="group/refresh inline-flex items-center space-x-1.5 cursor-pointer select-none py-1.5 px-4 bg-neutral-950/40 hover:bg-emerald-500/10 text-neutral-500 hover:text-emerald-400 font-mono text-xs font-bold rounded-r-full transition-all duration-150 border-y border-r border-white/5 hover:border-emerald-500/20 shadow-sm">
                     <span id="sync-icon" class="inline-block">↻</span>
-                    <span id="sync-text">[Sync Data Now]</span>
+                    <span id="sync-text">[Sync Group]</span>
                 </button>
             </div>
             
@@ -48,6 +48,16 @@
                 Nasdaq Tech Index (QQQ): <span id="qqq-value" class="text-neutral-500">Awaiting Manual Sync...</span>
             </div>
         </header>
+
+        <section class="border-b border-white/5 pb-1">
+            <div class="flex items-center justify-between">
+                <div id="tabs-container" class="flex items-center space-x-1 overflow-x-auto no-scrollbar scroll-smooth pr-4">
+                    </div>
+                <button id="add-tab-btn" class="text-xs font-mono font-bold bg-neutral-950/60 hover:bg-white/5 border border-white/5 hover:border-white/10 px-3 py-1.5 rounded-lg text-neutral-400 hover:text-emerald-400 transition-all active:scale-[0.95] flex-shrink-0">
+                    + New Tab
+                </button>
+            </div>
+        </section>
 
         <section class="bg-neutral-950/40 border border-white/10 shadow-2xl shadow-black/80 rounded-2xl p-5 backdrop-blur-md">
             <form id="asset-form" class="flex flex-col sm:flex-row gap-3">
@@ -60,7 +70,7 @@
 
         <section class="bg-neutral-950/20 border border-white/5 rounded-2xl px-6 py-4 backdrop-blur-sm">
             <div class="flex justify-between items-center pb-2 border-b border-white/5 text-[10px] uppercase tracking-wider font-semibold text-neutral-500 font-mono">
-                <span>Asset & Allocation</span>
+                <span id="allocation-header-title">Asset & Allocation</span>
                 <span>Total Value</span>
             </div>
             
@@ -92,8 +102,10 @@
 
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
-        const portfolioRef = ref(db, 'portfolio');
 
+        // Core Tracking State Variables
+        let activeTab = localStorage.getItem('active_portfolio_tab') || 'Main Portfolio';
+        let customTabsList = JSON.parse(localStorage.getItem('portfolio_tabs_list')) || ['Main Portfolio', 'Tech Growth'];
         let portfolio = {};
         let isPrivateMode = localStorage.getItem('privacy_shutter_enabled') === 'true';
 
@@ -111,12 +123,85 @@
         const manualRefreshBtn = document.getElementById('manual-refresh-btn');
         const syncIcon = document.getElementById('sync-icon');
         const syncText = document.getElementById('sync-text');
+        const tabsContainer = document.getElementById('tabs-container');
+        const addTabBtn = document.getElementById('add-add-tab-btn');
 
-        onValue(portfolioRef, (snapshot) => {
-            const data = snapshot.val();
-            portfolio = data || {};
-            renderPortfolio();
+        // Dynamic Firebase Sync Listener Core Pipeline
+        let currentDataListener = null;
+        function attachDatabaseListener() {
+            if (currentDataListener) currentDataListener(); // Disconnect existing database branches
+            
+            // Re-route database path pointers completely based on current tab value
+            const safeTabPath = encodeURIComponent(activeTab);
+            const relativeRef = ref(db, `portfolios/${safeTabPath}`);
+            
+            currentDataListener = onValue(relativeRef, (snapshot) => {
+                portfolio = snapshot.val() || {};
+                renderPortfolio();
+            });
+        }
+
+        // Tab Renderer Interface Engine
+        function renderTabs() {
+            tabsContainer.innerHTML = '';
+            customTabsList.forEach(tabName => {
+                const tab = document.createElement('button');
+                const isActive = tabName === activeTab;
+                
+                tab.className = `text-xs font-mono font-medium px-3.5 py-1.5 rounded-lg border transition-all flex-shrink-0 select-none ${
+                    isActive 
+                    ? 'bg-white/5 border-white/10 text-white font-bold' 
+                    : 'bg-transparent border-transparent text-neutral-500 hover:text-neutral-300 hover:bg-neutral-900/40'
+                }`;
+                tab.textContent = tabName;
+                
+                // Clicking swaps the dynamic routing instantly
+                tab.addEventListener('click', () => {
+                    activeTab = tabName;
+                    localStorage.setItem('active_portfolio_tab', activeTab);
+                    renderTabs();
+                    attachDatabaseListener();
+                });
+                
+                // Right-click options allow destroying empty/old tabs easily
+                tab.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    if (customTabsList.length <= 1) return; // Retain at least one default workspace
+                    if (confirm(`Delete the tab group "${tabName}" entirely?`)) {
+                        remove(ref(db, `portfolios/${encodeURIComponent(tabName)}`));
+                        customTabsList = customTabsList.filter(t => t !== tabName);
+                        localStorage.setItem('portfolio_tabs_list', JSON.stringify(customTabsList));
+                        if (activeTab === tabName) activeTab = customTabsList[0];
+                        localStorage.setItem('active_portfolio_tab', activeTab);
+                        renderTabs();
+                        attachDatabaseListener();
+                    }
+                });
+                
+                tabsContainer.appendChild(tab);
+            });
+        }
+
+        // Add Tab Interface Functionality
+        document.getElementById('add-tab-btn').addEventListener('click', () => {
+            const newName = prompt("Enter a unique name for your new asset tab:");
+            if (!newName) return;
+            const cleanName = newName.trim();
+            if (cleanName === '' || customTabsList.includes(cleanName)) {
+                alert("Invalid or duplicate portfolio tab name.");
+                return;
+            }
+            customTabsList.push(cleanName);
+            localStorage.setItem('portfolio_tabs_list', JSON.stringify(customTabsList));
+            activeTab = cleanName;
+            localStorage.setItem('active_portfolio_tab', activeTab);
+            renderTabs();
+            attachDatabaseListener();
         });
+
+        // Initialize App Tracking Hooks
+        renderTabs();
+        attachDatabaseListener();
 
         manualRefreshBtn.addEventListener('click', () => {
             refreshPrices();
@@ -145,7 +230,8 @@
             try {
                 const price = await fetchStockPrice(ticker);
                 if (price) {
-                    await set(ref(db, 'portfolio/' + ticker), {
+                    const safeTabPath = encodeURIComponent(activeTab);
+                    await set(ref(db, `portfolios/${safeTabPath}/${ticker}`), {
                         shares: newSharesTotal,
                         price: price
                     });
@@ -166,12 +252,7 @@
                 const data = await response.json();
                 
                 if (data["Note"]) {
-                    showError("Sync Throttled: Alpha Vantage 5-call per minute API limit reached.");
-                    return null;
-                }
-                
-                if (data["Information"]) {
-                    showError("API Message: " + data["Information"]);
+                    showError("Sync Throttled: Alpha Vantage API limit reached.");
                     return null;
                 }
 
@@ -179,7 +260,7 @@
                     return parseFloat(data["Global Quote"]["05. price"]);
                 }
                 
-                showError(`Symbol "${ticker}" not verified or out of API bounds.`);
+                showError(`Symbol "${ticker}" not verified or out of bounds.`);
                 return null;
             } catch (err) {
                 showError("Network connection error. Failed to reach pricing server.");
@@ -192,12 +273,6 @@
                 const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=QQQ&apikey=${ALPHA_VANTAGE_KEY}&_=${Date.now()}`;
                 const response = await fetch(url);
                 const data = await response.json();
-                
-                if (data["Note"]) {
-                    qqqValueDisplay.textContent = "Throttled (Wait 1m)";
-                    return;
-                }
-
                 if (data["Global Quote"] && data["Global Quote"]["05. price"]) {
                     const price = parseFloat(data["Global Quote"]["05. price"]).toFixed(2);
                     const changePercent = data["Global Quote"]["10. change percent"] || "0.00%";
@@ -209,137 +284,4 @@
                 }
             } catch (e) {
                 qqqValueDisplay.textContent = "Unavailable";
-                qqqValueDisplay.className = "text-neutral-600";
-            }
-        }
-
-        // RE-ENGINEERED: Unified update batching process prevents step-by-step UI updates
-        async function refreshPrices() {
-            const tickers = Object.keys(portfolio);
-            if (tickers.length === 0) {
-                await fetchMacroIndex();
-                return;
-            }
-
-            // Lock UI State immediately
-            manualRefreshBtn.disabled = true;
-            syncIcon.classList.add('animate-spin');
-            totalBalanceDisplay.classList.add('animate-pulse', 'text-emerald-500');
-            errorMsg.classList.add('hidden');
-
-            const updatesBatch = {};
-            let globalSyncSuccess = true;
-
-            for (let ticker of tickers) {
-                // Display exactly which asset is undergoing sync processing
-                syncText.textContent = `[Syncing: ${ticker}...]`;
-                
-                try {
-                    const freshPrice = await fetchStockPrice(ticker);
-                    if (freshPrice) {
-                        // Store locally in RAM instead of publishing directly to Firebase
-                        updatesBatch[`portfolio/${ticker}/price`] = freshPrice;
-                    } else {
-                        globalSyncSuccess = false;
-                        break; 
-                    }
-                    // 1.8 second delay to protect your strict API limit window
-                    await new Promise(res => setTimeout(res, 1800)); 
-                } catch (e) {
-                    globalSyncSuccess = false;
-                    console.error(e);
-                    break;
-                }
-            }
-            
-            // Push one unified single master update packet to Firebase only if everything updates cleanly
-            if (globalSyncSuccess && Object.keys(updatesBatch).length > 0) {
-                syncText.textContent = `[Finishing...]`;
-                await update(ref(db), updatesBatch);
-                updateTimestamp();
-                await fetchMacroIndex();
-            }
-
-            // Unlock and clean interface states
-            totalBalanceDisplay.classList.remove('animate-pulse', 'text-emerald-500');
-            syncIcon.classList.remove('animate-spin');
-            syncText.textContent = "[Sync Data Now]";
-            manualRefreshBtn.disabled = false;
-        }
-
-        window.removeItem = function(ticker) {
-            remove(ref(db, 'portfolio/' + ticker));
-        };
-
-        function getBrandColorClass(string) {
-            const colors = [
-                'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-                'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
-                'bg-blue-500/10 text-blue-400 border-blue-500/20',
-                'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
-                'bg-violet-500/10 text-violet-400 border-violet-500/20',
-                'bg-purple-500/10 text-purple-400 border-purple-500/20',
-                'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20'
-            ];
-            let hash = 0;
-            for (let i = 0; i < string.length; i++) {
-                hash = string.charCodeAt(i) + ((hash << 5) - hash);
-            }
-            return colors[Math.abs(hash) % colors.length];
-        }
-
-        function renderPortfolio() {
-            portfolioList.innerHTML = '';
-            let grandTotal = 0;
-            
-            privacyStatusLabel.textContent = isPrivateMode ? "[Show]" : "[Hide]";
-
-            const portfolioArray = Object.keys(portfolio).map(ticker => {
-                const totalVal = portfolio[ticker].shares * portfolio[ticker].price;
-                grandTotal += totalVal;
-                return {
-                    ticker: ticker,
-                    shares: portfolio[ticker].shares,
-                    price: portfolio[ticker].price,
-                    totalValue: totalVal
-                };
-            });
-
-            if (portfolioArray.length === 0) {
-                portfolioList.innerHTML = '<p class="text-center text-xs text-neutral-600 tracking-wide py-6">No assets tracked</p>';
-                totalBalanceDisplay.textContent = '$0.00';
-                totalBalanceDisplay.classList.remove('private-mask');
-                return;
-            }
-
-            portfolioArray.sort((a, b) => b.totalValue - a.totalValue);
-
-            portfolioArray.forEach(item => {
-                const allocationPercentage = grandTotal > 0 ? ((item.totalValue / grandTotal) * 100).toFixed(1) : "0.0";
-                
-                const row = document.createElement('div');
-                row.className = "flex items-center justify-between py-3.5 group transition-all duration-150";
-                
-                const identityContainer = document.createElement('div');
-                identityContainer.className = "flex items-center space-x-3.5";
-                
-                const logoIcon = document.createElement('div');
-                logoIcon.className = `w-9 h-9 flex items-center justify-center rounded-xl border text-xs font-bold tracking-wide font-mono shadow-sm flex-shrink-0 ${getBrandColorClass(item.ticker)}`;
-                logoIcon.textContent = item.ticker.charAt(0);
-                
-                const dataTextWrapper = document.createElement('div');
-                dataTextWrapper.className = "flex flex-col space-y-0.5";
-                
-                const badgeWrapper = document.createElement('div');
-                badgeWrapper.className = "flex items-center space-x-2";
-                
-                const symbolText = document.createElement('span');
-                symbolText.className = "text-sm font-medium tracking-wide text-neutral-200";
-                symbolText.textContent = item.ticker;
-                
-                const allocationBadge = document.createElement('span');
-                const isOverConcentrated = parseFloat(allocationPercentage) > 50.0;
-                
-                allocationBadge.className = isOverConcentrated 
-                    ? "text-[10px] bg-amber-500/10 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded-md font-mono font-bold shadow-sm shadow-amber-500/5"
-                    : "text-
+                qqqValueDisplay.className
